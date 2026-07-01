@@ -38,6 +38,7 @@ export function CustomersClient({ initialCustomers }: { initialCustomers: Custom
   const [form, setForm] = useState(EMPTY_FORM)
   const [loading, setLoading] = useState(false)
   const [importing, setImporting] = useState(false)
+  const [importProgress, setImportProgress] = useState<{ current: number; total: number } | null>(null)
   const [importResults, setImportResults] = useState<{ ok: number; errors: string[] } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
@@ -100,23 +101,29 @@ export function CustomersClient({ initialCustomers }: { initialCustomers: Custom
     const rows = parseCSV(text)
     let ok = 0
     const errors: string[] = []
+    const BATCH = 50
 
-    for (const row of rows) {
-      const name = row.name || row.nombre || ''
-      const document_number = row.document_number || row.documento || row.dni || row.ruc || ''
-      const document_type = (row.document_type || row.tipo || '').toUpperCase() === 'RUC' ? 'RUC' : 'DNI'
-      if (!name || !document_number) { errors.push(`Fila sin nombre o documento: ${JSON.stringify(row)}`); continue }
-      const { error } = await supabase.from('customers').upsert({
-        document_type, document_number: document_number.trim(), name: name.trim(),
-        email: row.email?.trim() || null,
-        phone: (row.phone || row.telefono)?.trim() || null,
-        address: (row.address || row.direccion)?.trim() || null,
-      }, { onConflict: 'document_type,document_number' })
-      if (error) errors.push(`${name}: ${error.message}`)
-      else ok++
+    setImportProgress({ current: 0, total: rows.length })
+
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const batch = rows.slice(i, i + BATCH)
+      const upsertRows = batch.map(row => {
+        const name = row.name || row.nombre || ''
+        const document_number = row.document_number || row.documento || row.dni || row.ruc || ''
+        const document_type = (row.document_type || row.tipo || '').toUpperCase() === 'RUC' ? 'RUC' : 'DNI'
+        if (!name || !document_number) { errors.push(`Fila sin nombre o documento`); return null }
+        return { document_type, document_number: document_number.trim(), name: name.trim(), email: row.email?.trim() || null, phone: (row.phone || row.telefono)?.trim() || null, address: (row.address || row.direccion)?.trim() || null }
+      }).filter(Boolean)
+
+      const { error } = await supabase.from('customers').upsert(upsertRows as any[], { onConflict: 'document_type,document_number' })
+      if (error) errors.push(`Lote ${Math.floor(i / BATCH) + 1}: ${error.message}`)
+      else ok += upsertRows.length
+
+      setImportProgress({ current: Math.min(i + BATCH, rows.length), total: rows.length })
     }
 
     setImportResults({ ok, errors })
+    setImportProgress(null)
     setImporting(false)
     if (ok > 0) router.refresh()
     e.target.value = ''
@@ -149,7 +156,23 @@ export function CustomersClient({ initialCustomers }: { initialCustomers: Custom
         </div>
       </div>
 
-      {importResults && (
+      {importProgress && (
+        <div className="rounded-lg border bg-white p-4 space-y-2">
+          <div className="flex justify-between text-sm text-gray-600">
+            <span>Importando clientes...</span>
+            <span className="font-medium">{importProgress.current} / {importProgress.total}</span>
+          </div>
+          <div className="w-full bg-gray-100 rounded-full h-2.5">
+            <div
+              className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+              style={{ width: `${Math.round((importProgress.current / importProgress.total) * 100)}%` }}
+            />
+          </div>
+          <p className="text-xs text-gray-400 text-right">{Math.round((importProgress.current / importProgress.total) * 100)}%</p>
+        </div>
+      )}
+
+      {importResults && !importProgress && (
         <div className={`rounded-lg p-3 text-sm ${importResults.errors.length > 0 ? 'bg-yellow-50 border border-yellow-200' : 'bg-green-50 border border-green-200'}`}>
           <p className="font-medium">{importResults.ok} clientes importados correctamente</p>
           {importResults.errors.slice(0, 5).map((e, i) => <p key={i} className="text-red-600 text-xs mt-1">{e}</p>)}

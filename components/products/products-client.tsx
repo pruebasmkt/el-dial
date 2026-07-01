@@ -35,6 +35,7 @@ export function ProductsClient({ initialProducts, categories: initialCategories 
   const [loading, setLoading] = useState(false)
   const [categoryLoading, setCategoryLoading] = useState(false)
   const [importing, setImporting] = useState(false)
+  const [importProgress, setImportProgress] = useState<{ current: number; total: number } | null>(null)
   const [importResults, setImportResults] = useState<{ ok: number; errors: string[] } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
@@ -66,34 +67,34 @@ export function ProductsClient({ initialProducts, categories: initialCategories 
 
     let ok = 0
     const errors: string[] = []
+    const BATCH = 50
 
-    for (const row of rows) {
-      const sku = (row.sku || '').trim().toUpperCase()
-      const name = (row.name || row.nombre || '').trim()
-      if (!sku || !name) { errors.push(`Fila sin SKU o nombre`); continue }
+    setImportProgress({ current: 0, total: rows.length })
 
-      // Buscar category_id por nombre si viene
-      let category_id = null
-      const catName = (row.category || row.categoria || '').trim()
-      if (catName) {
-        const found = categories.find(c => c.name.toLowerCase() === catName.toLowerCase())
-        if (found) category_id = found.id
-      }
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const batch = rows.slice(i, i + BATCH)
+      const upsertRows = batch.map(row => {
+        const sku = (row.sku || '').trim().toUpperCase()
+        const name = (row.name || row.nombre || '').trim()
+        if (!sku || !name) { errors.push(`Fila sin SKU o nombre`); return null }
+        let category_id = null
+        const catName = (row.category || row.categoria || '').trim()
+        if (catName) {
+          const found = categories.find(c => c.name.toLowerCase() === catName.toLowerCase())
+          if (found) category_id = found.id
+        }
+        return { sku, name, description: row.description?.trim() || null, category_id, unit: row.unit?.trim() || 'unidad', min_stock: Number(row.min_stock) || 5 }
+      }).filter(Boolean)
 
-      const { error } = await supabase.from('products').upsert({
-        sku,
-        name,
-        description: row.description?.trim() || null,
-        category_id,
-        unit: row.unit?.trim() || 'unidad',
-        min_stock: Number(row.min_stock) || 5,
-      }, { onConflict: 'sku' })
+      const { error } = await supabase.from('products').upsert(upsertRows as any[], { onConflict: 'sku' })
+      if (error) errors.push(`Lote ${Math.floor(i / BATCH) + 1}: ${error.message}`)
+      else ok += upsertRows.length
 
-      if (error) errors.push(`${sku}: ${error.message}`)
-      else ok++
+      setImportProgress({ current: Math.min(i + BATCH, rows.length), total: rows.length })
     }
 
     setImportResults({ ok, errors })
+    setImportProgress(null)
     setImporting(false)
     if (ok > 0) router.refresh()
     e.target.value = ''
@@ -190,6 +191,7 @@ export function ProductsClient({ initialProducts, categories: initialCategories 
             <Upload className="h-4 w-4 mr-1" /> {importing ? 'Importando...' : 'Importar CSV'}
           </Button>
           <input ref={fileRef} type="file" accept=".csv,.txt" className="hidden" onChange={handleImport} />
+
           <Button variant="outline" onClick={() => setCategoryOpen(true)}>
             <Tag className="h-4 w-4 mr-2" /> Categorías
           </Button>
@@ -199,7 +201,23 @@ export function ProductsClient({ initialProducts, categories: initialCategories 
         </div>
       </div>
 
-      {importResults && (
+      {importProgress && (
+        <div className="rounded-lg border bg-white p-4 space-y-2">
+          <div className="flex justify-between text-sm text-gray-600">
+            <span>Importando productos...</span>
+            <span className="font-medium">{importProgress.current} / {importProgress.total}</span>
+          </div>
+          <div className="w-full bg-gray-100 rounded-full h-2.5">
+            <div
+              className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+              style={{ width: `${Math.round((importProgress.current / importProgress.total) * 100)}%` }}
+            />
+          </div>
+          <p className="text-xs text-gray-400 text-right">{Math.round((importProgress.current / importProgress.total) * 100)}%</p>
+        </div>
+      )}
+
+      {importResults && !importProgress && (
         <div className={`rounded-lg p-3 text-sm ${importResults.errors.length > 0 ? 'bg-yellow-50 border border-yellow-200' : 'bg-green-50 border border-green-200'}`}>
           <p className="font-medium">{importResults.ok} productos importados correctamente</p>
           {importResults.errors.slice(0, 5).map((e, i) => <p key={i} className="text-red-600 text-xs mt-1">{e}</p>)}
