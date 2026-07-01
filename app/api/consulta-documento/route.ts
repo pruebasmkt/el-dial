@@ -23,34 +23,28 @@ export async function GET(req: NextRequest) {
   try {
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      next: { revalidate: 0 },
+      cache: 'no-store',
     })
 
-    if (!res.ok) {
-      const body = await res.text()
-      return NextResponse.json({ error: `Error del servicio: ${res.status}` }, { status: res.status })
+    const json = await res.json()
+
+    // apiperu.dev devuelve { success: true, data: { ... } }
+    const d = json?.data ?? json
+
+    if (!res.ok || json?.success === false) {
+      return NextResponse.json({ error: json?.message ?? `No se encontró el ${isDNI ? 'DNI' : 'RUC'}` }, { status: 404 })
     }
 
-    const data = await res.json()
-
     if (isDNI) {
-      return NextResponse.json({
-        tipo: 'DNI',
-        numero: documento,
-        nombre: data.nombre_completo ?? data.nombre ?? '',
-        apellidos: data.apellido_paterno
-          ? `${data.apellido_paterno} ${data.apellido_materno ?? ''}`.trim()
-          : '',
-      })
+      const nombre = d.nombre_completo
+        ?? (d.nombres && d.apellido_paterno ? `${d.apellido_paterno} ${d.apellido_materno ?? ''} ${d.nombres}`.trim() : '')
+        ?? d.nombre
+        ?? ''
+      return NextResponse.json({ tipo: 'DNI', numero: documento, nombre, apellidos: '' })
     } else {
-      return NextResponse.json({
-        tipo: 'RUC',
-        numero: documento,
-        nombre: data.nombre_o_razon_social ?? data.razon_social ?? '',
-        direccion: data.direccion ?? '',
-        estado: data.estado ?? '',
-        condicion: data.condicion ?? '',
-      })
+      const nombre = d.nombre_o_razon_social ?? d.razon_social ?? d.nombre ?? ''
+      const direccion = d.direccion ?? d.direccion_completa ?? ''
+      return NextResponse.json({ tipo: 'RUC', numero: documento, nombre, direccion })
     }
   } catch (err) {
     return NextResponse.json({ error: 'No se pudo conectar con apiperu.dev' }, { status: 502 })
