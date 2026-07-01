@@ -52,17 +52,17 @@ export const STOCK_STATUS_COLORS = {
 } as const
 
 export const PO_STATUS_LABELS = {
-  draft: 'Borrador',
-  confirmed: 'Confirmada',
+  draft: 'Pendiente',
+  confirmed: 'Pendiente',
   received: 'Recibida',
   cancelled: 'Cancelada',
 } as const
 
 export const PO_STATUS_COLORS = {
-  draft: 'text-gray-600 bg-gray-100',
-  confirmed: 'text-blue-600 bg-blue-50',
-  received: 'text-green-600 bg-green-50',
-  cancelled: 'text-red-600 bg-red-50',
+  draft: 'text-orange-700 bg-orange-100 border-orange-200',
+  confirmed: 'text-orange-700 bg-orange-100 border-orange-200',
+  received: 'text-green-700 bg-green-100 border-green-200',
+  cancelled: 'text-red-700 bg-red-100 border-red-200',
 } as const
 
 export const SALE_STATUS_LABELS = {

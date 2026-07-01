@@ -109,12 +109,6 @@ export function PurchasesClient({ initialOrders, products, suppliers: initialSup
     setLoading(false)
   }
 
-  async function confirmOrder(id: string) {
-    await supabase.from('purchase_orders').update({ status: 'confirmed' }).eq('id', id)
-    router.refresh()
-    toast({ title: 'Orden confirmada' })
-  }
-
   async function receiveOrder(id: string) {
     const { error } = await supabase.rpc('receive_purchase_order', { p_order_id: id })
     if (error) toast({ title: 'Error', description: error.message, variant: 'destructive' })
@@ -219,10 +213,7 @@ export function PurchasesClient({ initialOrders, products, suppliers: initialSup
                 <TableCell>
                   <div className="flex gap-1">
                     <Button variant="ghost" size="sm" onClick={() => setDetailOrder(o)}>Ver</Button>
-                    {o.status === 'draft' && (
-                      <Button variant="outline" size="sm" onClick={() => confirmOrder(o.id)}>Confirmar</Button>
-                    )}
-                    {o.status === 'confirmed' && (
+                    {(o.status === 'draft' || o.status === 'confirmed') && (
                       <Button size="sm" onClick={() => receiveOrder(o.id)}>
                         <Package className="h-3 w-3 mr-1" /> Recibir
                       </Button>
