@@ -11,11 +11,11 @@ import { Button } from '@/components/ui/button'
 
 const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/dashboard/products', label: 'Productos', icon: Package },
-  { href: '/dashboard/purchases', label: 'Compras', icon: ShoppingCart },
-  { href: '/dashboard/sales', label: 'Ventas', icon: TrendingUp },
-  { href: '/dashboard/inventory', label: 'Inventario', icon: Boxes },
-  { href: '/dashboard/reports', label: 'Reportes', icon: BarChart3 },
+  { href: '/products', label: 'Productos', icon: Package },
+  { href: '/purchases', label: 'Compras', icon: ShoppingCart },
+  { href: '/sales', label: 'Ventas', icon: TrendingUp },
+  { href: '/inventory', label: 'Inventario', icon: Boxes },
+  { href: '/reports', label: 'Reportes', icon: BarChart3 },
 ]
 
 interface SidebarProps {
