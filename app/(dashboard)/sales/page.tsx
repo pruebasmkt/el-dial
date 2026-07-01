@@ -5,7 +5,7 @@ export const revalidate = 0
 
 export default async function SalesPage() {
   const supabase = await createClient()
-  const [{ data: sales }, { data: products }] = await Promise.all([
+  const [{ data: sales }, { data: products }, { data: customers }] = await Promise.all([
     supabase
       .from('sales')
       .select('*, sale_items(*, products(name, sku))')
@@ -16,6 +16,11 @@ export default async function SalesPage() {
       .select('id, name, sku, unit, current_stock, avg_cost_pen')
       .gt('current_stock', 0)
       .order('name'),
+    supabase
+      .from('customers')
+      .select('id, document_type, document_number, name, email, phone')
+      .eq('is_active', true)
+      .order('name'),
   ])
 
   return (
@@ -24,7 +29,11 @@ export default async function SalesPage() {
         <h1 className="text-2xl font-bold text-gray-900">Ventas</h1>
         <p className="text-gray-500 text-sm">Registro de ventas con costo FIFO y utilidad real</p>
       </div>
-      <SalesClient initialSales={sales ?? []} availableProducts={products ?? []} />
+      <SalesClient
+        initialSales={sales ?? []}
+        availableProducts={products ?? []}
+        initialCustomers={customers ?? []}
+      />
     </div>
   )
 }

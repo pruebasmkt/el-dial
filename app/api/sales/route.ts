@@ -9,7 +9,8 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
 
   const body = await req.json()
-  const { customer_name, currency, exchange_rate, notes, items } = body as {
+  const { customer_id, customer_name, currency, exchange_rate, notes, items } = body as {
+    customer_id?: string
     customer_name?: string
     currency: Currency
     exchange_rate: number
@@ -19,7 +20,6 @@ export async function POST(req: NextRequest) {
 
   if (!items?.length) return NextResponse.json({ error: 'Sin items' }, { status: 400 })
 
-  // Convertir precios a soles
   const itemsPen = items.map(i => ({
     ...i,
     unit_price_pen: convertToSoles(i.unit_price, currency, exchange_rate),
@@ -27,19 +27,20 @@ export async function POST(req: NextRequest) {
 
   const subtotal = itemsPen.reduce((s, i) => s + i.quantity * i.unit_price_pen, 0)
 
-  // Generar número de venta
-  const sale_number = `VT-${Date.now()}`
+  // Número correlativo con secuencia PostgreSQL
+  const { data: seqData } = await supabase.rpc('nextval_sale')
+  const sale_number = `VT-${String(seqData ?? Date.now()).padStart(6, '0')}`
 
-  // Crear la venta (sin costo aún, se llenará tras FIFO)
   const { data: sale, error: saleErr } = await supabase
     .from('sales')
     .insert({
       sale_number,
+      customer_id: customer_id || null,
       customer_name: customer_name || null,
       currency,
       exchange_rate,
       subtotal,
-      total_cost_pen: 0, // se actualizará
+      total_cost_pen: 0,
       notes: notes || null,
     })
     .select()
@@ -51,9 +52,7 @@ export async function POST(req: NextRequest) {
 
   let totalCostPen = 0
 
-  // Procesar cada ítem con FIFO
   for (const item of itemsPen) {
-    // Insertar sale_item con costo temporal 0
     const { data: saleItem, error: siErr } = await supabase
       .from('sale_items')
       .insert({
@@ -61,18 +60,16 @@ export async function POST(req: NextRequest) {
         product_id: item.product_id,
         quantity: item.quantity,
         unit_price_pen: item.unit_price_pen,
-        unit_cost_pen: 0, // se actualizará
+        unit_cost_pen: 0,
       })
       .select()
       .single()
 
     if (siErr || !saleItem) {
-      // Rollback: eliminar venta creada
       await supabase.from('sales').delete().eq('id', sale.id)
       return NextResponse.json({ error: siErr?.message ?? 'Error creando item' }, { status: 500 })
     }
 
-    // Aplicar FIFO y obtener costo unitario promedio
     const { data: unitCost, error: fifoErr } = await supabase
       .rpc('process_sale_item_fifo', {
         p_sale_item_id: saleItem.id,
@@ -88,14 +85,12 @@ export async function POST(req: NextRequest) {
     const itemCostPen = Number(unitCost) * item.quantity
     totalCostPen += itemCostPen
 
-    // Actualizar unit_cost_pen en el item
     await supabase
       .from('sale_items')
       .update({ unit_cost_pen: Number(unitCost) })
       .eq('id', saleItem.id)
   }
 
-  // Actualizar costo total en la venta
   await supabase
     .from('sales')
     .update({ total_cost_pen: totalCostPen })

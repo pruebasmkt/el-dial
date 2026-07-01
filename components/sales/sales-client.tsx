@@ -6,35 +6,98 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
+import { Combobox } from '@/components/ui/combobox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Card, CardContent } from '@/components/ui/card'
-import { Plus, Trash2, TrendingUp, Eye } from 'lucide-react'
+import { Plus, Trash2, TrendingUp, Eye, UserPlus, Search, X } from 'lucide-react'
 import { formatCurrency, formatDateTime, formatPercent, convertToSoles } from '@/lib/utils'
+import { createClient } from '@/lib/supabase/client'
 import type { Sale, Currency } from '@/types'
 
 interface AvailableProduct {
   id: string; name: string; sku: string; unit: string; current_stock: number; avg_cost_pen: number
+}
+interface Customer {
+  id: string; document_type: string; document_number: string; name: string; email?: string; phone?: string
 }
 interface SaleItem { product_id: string; quantity: number; unit_price: number }
 
 interface Props {
   initialSales: Sale[]
   availableProducts: AvailableProduct[]
+  initialCustomers: Customer[]
 }
 
-export function SalesClient({ initialSales, availableProducts }: Props) {
+export function SalesClient({ initialSales, availableProducts, initialCustomers }: Props) {
   const [open, setOpen] = useState(false)
   const [detailSale, setDetailSale] = useState<Sale | null>(null)
   const [currency, setCurrency] = useState<Currency>('PEN')
   const [exchangeRate, setExchangeRate] = useState(3.75)
-  const [customerName, setCustomerName] = useState('')
   const [notes, setNotes] = useState('')
   const [items, setItems] = useState<SaleItem[]>([{ product_id: '', quantity: 1, unit_price: 0 }])
   const [loading, setLoading] = useState(false)
+
+  // Customer state
+  const [customers, setCustomers] = useState<Customer[]>(initialCustomers)
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
+  const [docQuery, setDocQuery] = useState('')
+  const [docType, setDocType] = useState<'DNI' | 'RUC'>('DNI')
+  const [newCustomerOpen, setNewCustomerOpen] = useState(false)
+  const [newCustomerForm, setNewCustomerForm] = useState({ name: '', email: '', phone: '' })
+  const [customerLoading, setCustomerLoading] = useState(false)
+
   const router = useRouter()
+  const supabase = createClient()
   const { toast } = useToast()
+
+  const productOptions = availableProducts.map(p => ({
+    value: p.id,
+    label: p.name,
+    sublabel: `SKU: ${p.sku} · Stock: ${p.current_stock}`
+  }))
+
+  const matchedCustomer = customers.find(
+    c => c.document_type === docType && c.document_number === docQuery.trim()
+  )
+
+  function handleDocSearch() {
+    if (!docQuery.trim()) return
+    if (matchedCustomer) {
+      setSelectedCustomer(matchedCustomer)
+    } else {
+      setNewCustomerOpen(true)
+      setNewCustomerForm({ name: '', email: '', phone: '' })
+    }
+  }
+
+  function clearCustomer() {
+    setSelectedCustomer(null)
+    setDocQuery('')
+  }
+
+  async function handleCreateCustomer() {
+    if (!newCustomerForm.name.trim() || !docQuery.trim()) return
+    setCustomerLoading(true)
+    const { data, error } = await supabase.from('customers').insert({
+      document_type: docType,
+      document_number: docQuery.trim(),
+      name: newCustomerForm.name.trim(),
+      email: newCustomerForm.email.trim() || null,
+      phone: newCustomerForm.phone.trim() || null,
+    }).select().single()
+
+    if (error) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' })
+    } else if (data) {
+      setCustomers(prev => [...prev, data])
+      setSelectedCustomer(data)
+      setNewCustomerOpen(false)
+      toast({ title: 'Cliente creado', variant: 'success' })
+    }
+    setCustomerLoading(false)
+  }
 
   function addItem() { setItems(i => [...i, { product_id: '', quantity: 1, unit_price: 0 }]) }
   function removeItem(idx: number) { setItems(i => i.filter((_, j) => j !== idx)) }
@@ -44,8 +107,6 @@ export function SalesClient({ initialSales, availableProducts }: Props) {
 
   const subtotalOriginal = items.reduce((s, i) => s + i.quantity * i.unit_price, 0)
   const subtotalPen = convertToSoles(subtotalOriginal, currency, exchangeRate)
-
-  // Costo estimado según FIFO (promedio simple para mostrar al usuario)
   const estimatedCost = items.reduce((s, i) => {
     const prod = availableProducts.find(p => p.id === i.product_id)
     return s + i.quantity * (prod?.avg_cost_pen ?? 0)
@@ -58,7 +119,6 @@ export function SalesClient({ initialSales, availableProducts }: Props) {
       toast({ title: 'Datos incompletos', description: 'Completa todos los campos de los productos', variant: 'destructive' })
       return
     }
-    // Validar stock
     for (const item of items) {
       const prod = availableProducts.find(p => p.id === item.product_id)
       if (prod && item.quantity > prod.current_stock) {
@@ -70,7 +130,11 @@ export function SalesClient({ initialSales, availableProducts }: Props) {
     const res = await fetch('/api/sales', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ customer_name: customerName, currency, exchange_rate: exchangeRate, notes, items }),
+      body: JSON.stringify({
+        customer_id: selectedCustomer?.id ?? null,
+        customer_name: selectedCustomer?.name ?? null,
+        currency, exchange_rate: exchangeRate, notes, items
+      }),
     })
     const data = await res.json()
     if (!res.ok) {
@@ -85,7 +149,8 @@ export function SalesClient({ initialSales, availableProducts }: Props) {
   }
 
   function resetForm() {
-    setCustomerName(''); setNotes(''); setCurrency('PEN'); setExchangeRate(3.75)
+    setSelectedCustomer(null); setDocQuery(''); setDocType('DNI')
+    setNotes(''); setCurrency('PEN'); setExchangeRate(3.75)
     setItems([{ product_id: '', quantity: 1, unit_price: 0 }])
   }
 
@@ -150,11 +215,57 @@ export function SalesClient({ initialSales, availableProducts }: Props) {
             <DialogTitle>Registrar Venta</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="grid grid-cols-3 gap-4">
-              <div className="space-y-1.5">
-                <Label>Cliente</Label>
-                <Input placeholder="Nombre del cliente" value={customerName} onChange={e => setCustomerName(e.target.value)} />
-              </div>
+            {/* Cliente con DNI/RUC */}
+            <div className="border rounded-lg p-3 space-y-2 bg-gray-50">
+              <Label className="text-sm font-semibold">Cliente</Label>
+              {selectedCustomer ? (
+                <div className="flex items-center justify-between bg-white border rounded-md px-3 py-2">
+                  <div>
+                    <div className="font-medium text-sm">{selectedCustomer.name}</div>
+                    <div className="text-xs text-gray-500">
+                      {selectedCustomer.document_type}: {selectedCustomer.document_number}
+                      {selectedCustomer.phone ? ` · ${selectedCustomer.phone}` : ''}
+                    </div>
+                  </div>
+                  <Button variant="ghost" size="icon" onClick={clearCustomer}><X className="h-4 w-4" /></Button>
+                </div>
+              ) : (
+                <>
+                  <div className="flex gap-2">
+                    <Select value={docType} onValueChange={v => setDocType(v as 'DNI' | 'RUC')}>
+                      <SelectTrigger className="w-24"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="DNI">DNI</SelectItem>
+                        <SelectItem value="RUC">RUC</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      placeholder={docType === 'DNI' ? '12345678' : '20123456789'}
+                      value={docQuery}
+                      onChange={e => setDocQuery(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleDocSearch()}
+                      className="flex-1"
+                      maxLength={docType === 'DNI' ? 8 : 11}
+                    />
+                    <Button variant="outline" onClick={handleDocSearch} disabled={!docQuery.trim()}>
+                      <Search className="h-4 w-4 mr-1" /> Buscar
+                    </Button>
+                  </div>
+                  {docQuery && matchedCustomer && (
+                    <button
+                      className="w-full text-left px-3 py-2 bg-blue-50 border border-blue-200 rounded text-sm hover:bg-blue-100"
+                      onClick={() => setSelectedCustomer(matchedCustomer)}
+                    >
+                      <span className="font-medium">{matchedCustomer.name}</span>
+                      <span className="text-gray-500 ml-2">{matchedCustomer.document_type}: {matchedCustomer.document_number}</span>
+                    </button>
+                  )}
+                  <p className="text-xs text-gray-400">Opcional — deja vacío para venta sin cliente identificado</p>
+                </>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <Label>Moneda</Label>
                 <Select value={currency} onValueChange={v => setCurrency(v as Currency)}>
@@ -185,18 +296,14 @@ export function SalesClient({ initialSales, availableProducts }: Props) {
                 return (
                   <div key={idx} className="grid grid-cols-12 gap-2 items-end">
                     <div className="col-span-5 space-y-1">
-                      {idx === 0 && <Label className="text-xs">Producto</Label>}
-                      <Select value={item.product_id} onValueChange={v => updateItem(idx, 'product_id', v)}>
-                        <SelectTrigger><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
-                        <SelectContent>
-                          {availableProducts.map(p => (
-                            <SelectItem key={p.id} value={p.id}>
-                              {p.name} ({p.current_stock} disponibles)
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {prod && <p className="text-xs text-gray-400">Costo prom: {formatCurrency(prod.avg_cost_pen)}</p>}
+                      {idx === 0 && <Label className="text-xs">Producto (nombre o SKU)</Label>}
+                      <Combobox
+                        options={productOptions}
+                        value={item.product_id}
+                        onSelect={v => updateItem(idx, 'product_id', v)}
+                        placeholder="Buscar producto..."
+                      />
+                      {prod && <p className="text-xs text-gray-400">Costo prom: {formatCurrency(prod.avg_cost_pen)} · Stock: {prod.current_stock}</p>}
                     </div>
                     <div className="col-span-2 space-y-1">
                       {idx === 0 && <Label className="text-xs">Cantidad</Label>}
@@ -216,7 +323,6 @@ export function SalesClient({ initialSales, availableProducts }: Props) {
               })}
             </div>
 
-            {/* Resumen financiero estimado */}
             <Card className="bg-green-50 border-green-100">
               <CardContent className="pt-4 pb-3 space-y-1 text-sm">
                 <div className="flex justify-between">
@@ -243,6 +349,40 @@ export function SalesClient({ initialSales, availableProducts }: Props) {
             <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
             <Button onClick={handleCreate} disabled={loading}>
               {loading ? 'Procesando FIFO...' : 'Registrar Venta'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog crear cliente nuevo */}
+      <Dialog open={newCustomerOpen} onOpenChange={setNewCustomerOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle><UserPlus className="inline h-4 w-4 mr-2" />Nuevo Cliente</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="bg-blue-50 border border-blue-200 rounded px-3 py-2 text-sm">
+              <span className="font-medium">{docType}:</span> {docQuery} — no encontrado en base de datos
+            </div>
+            <div className="space-y-1.5">
+              <Label>Nombre / Razón Social *</Label>
+              <Input placeholder="Juan Pérez" value={newCustomerForm.name} onChange={e => setNewCustomerForm(f => ({ ...f, name: e.target.value }))} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Teléfono</Label>
+                <Input placeholder="999 999 999" value={newCustomerForm.phone} onChange={e => setNewCustomerForm(f => ({ ...f, phone: e.target.value }))} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Email</Label>
+                <Input placeholder="correo@email.com" value={newCustomerForm.email} onChange={e => setNewCustomerForm(f => ({ ...f, email: e.target.value }))} />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNewCustomerOpen(false)}>Continuar sin cliente</Button>
+            <Button onClick={handleCreateCustomer} disabled={customerLoading || !newCustomerForm.name.trim()}>
+              {customerLoading ? 'Guardando...' : 'Crear y Seleccionar'}
             </Button>
           </DialogFooter>
         </DialogContent>

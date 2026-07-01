@@ -67,10 +67,13 @@ export function PurchasesClient({ initialOrders, products, suppliers: initialSup
     }
     setLoading(true)
     const selectedSupplier = suppliers.find(s => s.id === supplierId)
+    const { data: seqData } = await supabase.rpc('nextval_purchase_order')
+    const orderNumber = `OC-${String(seqData ?? Date.now()).padStart(6, '0')}`
+
     const { data: order, error: orderErr } = await supabase
       .from('purchase_orders')
       .insert({
-        order_number: `OC-${Date.now()}`,
+        order_number: orderNumber,
         supplier_name: selectedSupplier?.name ?? '',
         order_date: orderDate,
         currency,
