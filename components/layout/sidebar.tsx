@@ -1,11 +1,12 @@
 "use client"
 import Link from 'next/link'
+import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
 import {
   LayoutDashboard, Package, ShoppingCart, TrendingUp,
-  Boxes, BarChart3, Zap, LogOut, AlertTriangle, Users,
+  Boxes, BarChart3, LogOut, AlertTriangle, Users,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
@@ -39,9 +40,7 @@ export function Sidebar({ lowStockCount = 0 }: SidebarProps) {
       {/* Logo */}
       <div className="p-6 border-b border-gray-700">
         <div className="flex items-center gap-3">
-          <div className="bg-blue-500 p-2 rounded-lg">
-            <Zap className="h-5 w-5 text-white" />
-          </div>
+          <Image src="/logo.png" alt="El Dial" width={40} height={40} className="rounded-lg" />
           <div>
             <h1 className="font-bold text-lg leading-none">El Dial</h1>
             <p className="text-xs text-gray-400 mt-0.5">Gestión de Tienda</p>
