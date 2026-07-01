@@ -1,5 +1,5 @@
 "use client"
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useToast } from '@/components/ui/use-toast'
 import { Button } from '@/components/ui/button'
@@ -23,6 +23,7 @@ interface Customer {
   id: string; document_type: string; document_number: string; name: string; email?: string; phone?: string
 }
 interface SaleItem { product_id: string; quantity: number; unit_price: number }
+interface Lot { lot_num: number; quantity_remaining: number; unit_cost_pen: number; received_at: string }
 
 interface Props {
   initialSales: Sale[]
@@ -38,6 +39,7 @@ export function SalesClient({ initialSales, availableProducts, initialCustomers 
   const [notes, setNotes] = useState('')
   const [items, setItems] = useState<SaleItem[]>([{ product_id: '', quantity: 1, unit_price: 0 }])
   const [loading, setLoading] = useState(false)
+  const [lotsCache, setLotsCache] = useState<Record<string, Lot[]>>({})
 
   // Customer state
   const [customers, setCustomers] = useState<Customer[]>(initialCustomers)
@@ -97,6 +99,25 @@ export function SalesClient({ initialSales, availableProducts, initialCustomers 
       toast({ title: 'Cliente creado', variant: 'success' })
     }
     setCustomerLoading(false)
+  }
+
+  async function fetchLots(productId: string) {
+    if (!productId || lotsCache[productId]) return
+    const { data } = await supabase
+      .from('inventory_lots')
+      .select('quantity_remaining, unit_cost_pen, received_at')
+      .eq('product_id', productId)
+      .gt('quantity_remaining', 0)
+      .order('received_at', { ascending: true })
+    if (data) {
+      const lots = data.map((l, i) => ({ lot_num: i + 1, ...l }))
+      setLotsCache(prev => ({ ...prev, [productId]: lots }))
+    }
+  }
+
+  function handleProductSelect(idx: number, productId: string) {
+    updateItem(idx, 'product_id', productId)
+    if (productId) fetchLots(productId)
   }
 
   function addItem() { setItems(i => [...i, { product_id: '', quantity: 1, unit_price: 0 }]) }
@@ -300,10 +321,25 @@ export function SalesClient({ initialSales, availableProducts, initialCustomers 
                       <Combobox
                         options={productOptions}
                         value={item.product_id}
-                        onSelect={v => updateItem(idx, 'product_id', v)}
+                        onSelect={v => handleProductSelect(idx, v)}
                         placeholder="Buscar producto..."
                       />
-                      {prod && <p className="text-xs text-gray-400">Costo prom: {formatCurrency(prod.avg_cost_pen)} · Stock: {prod.current_stock}</p>}
+                      {prod && (
+                        <div className="text-xs text-gray-400">
+                          Stock: {prod.current_stock} · Costo prom: {formatCurrency(prod.avg_cost_pen)}
+                        </div>
+                      )}
+                      {item.product_id && lotsCache[item.product_id] && (
+                        <div className="flex flex-wrap gap-1 mt-0.5">
+                          {lotsCache[item.product_id].map(lot => (
+                            <span key={lot.lot_num} className="inline-flex items-center gap-1 bg-amber-50 border border-amber-200 text-amber-800 rounded px-1.5 py-0.5 text-[10px] font-mono">
+                              LT-{String(lot.lot_num).padStart(2,'0')}
+                              <span className="text-amber-600">{formatCurrency(lot.unit_cost_pen)}</span>
+                              <span className="text-gray-400">({lot.quantity_remaining}u)</span>
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                     <div className="col-span-2 space-y-1">
                       {idx === 0 && <Label className="text-xs">Cantidad</Label>}
