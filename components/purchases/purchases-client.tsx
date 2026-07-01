@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Card, CardContent } from '@/components/ui/card'
-import { Plus, Trash2, ShoppingCart, Package, Building2, X, Upload, Download } from 'lucide-react'
+import { Plus, Trash2, ShoppingCart, Package, Building2, X, Upload, Download, AlertCircle } from 'lucide-react'
 import { formatCurrency, formatDate, PO_STATUS_LABELS, PO_STATUS_COLORS, convertToSoles } from '@/lib/utils'
 import type { PurchaseOrder, Product, Supplier, Currency } from '@/types'
 
@@ -116,6 +116,13 @@ export function PurchasesClient({ initialOrders, products, suppliers: initialSup
       toast({ title: 'Error', description: orderErr?.message, variant: 'destructive' })
     }
     setLoading(false)
+  }
+
+  async function deleteOrder(id: string) {
+    if (!confirm('¿Eliminar esta orden de compra? Esta acción no se puede deshacer.')) return
+    const { error } = await supabase.from('purchase_orders').delete().eq('id', id)
+    if (error) toast({ title: 'Error al eliminar', description: error.message, variant: 'destructive' })
+    else { toast({ title: 'Orden eliminada', variant: 'success' }); router.refresh() }
   }
 
   async function receiveOrder(id: string) {
@@ -398,9 +405,14 @@ export function PurchasesClient({ initialOrders, products, suppliers: initialSup
                   <div className="flex gap-1">
                     <Button variant="ghost" size="sm" onClick={() => setDetailOrder(o)}>Ver</Button>
                     {(o.status === 'draft' || o.status === 'confirmed') && (
-                      <Button size="sm" onClick={() => receiveOrder(o.id)}>
-                        <Package className="h-3 w-3 mr-1" /> Recibir
-                      </Button>
+                      <>
+                        <Button size="sm" onClick={() => receiveOrder(o.id)}>
+                          <Package className="h-3 w-3 mr-1" /> Recibir
+                        </Button>
+                        <Button size="sm" variant="ghost" className="text-red-500 hover:text-red-700 hover:bg-red-50" onClick={() => deleteOrder(o.id)}>
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </>
                     )}
                   </div>
                 </TableCell>
