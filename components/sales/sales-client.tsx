@@ -84,9 +84,11 @@ export function SalesClient({ initialSales, availableProducts, initialCustomers 
         toast({ title: `${data.tipo === 'DNI' ? 'RENIEC' : 'SUNAT'}: ${nombreCompleto}`, description: 'Datos precargados — revisa y confirma', variant: 'success' })
       } else {
         setNewCustomerForm({ name: '', email: '', phone: '', address: '' })
+        toast({ title: data.error ?? 'No encontrado en RENIEC/SUNAT', description: 'Puedes ingresar los datos manualmente', variant: 'destructive' })
       }
     } catch {
       setNewCustomerForm({ name: '', email: '', phone: '', address: '' })
+      toast({ title: 'Error de conexión con RENIEC/SUNAT', description: 'Ingresa los datos manualmente', variant: 'destructive' })
     }
     setConsultaLoading(false)
     setNewCustomerOpen(true)
