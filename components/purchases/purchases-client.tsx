@@ -47,6 +47,12 @@ export function PurchasesClient({ initialOrders, products, suppliers: initialSup
   const [supplierImportResults, setSupplierImportResults] = useState<{ ok: number; errors: string[] } | null>(null)
   const supplierFileRef = useRef<HTMLInputElement>(null)
 
+  // Purchase import
+  const [purchaseImporting, setPurchaseImporting] = useState(false)
+  const [purchaseImportProgress, setPurchaseImportProgress] = useState<{ current: number; total: number; label: string } | null>(null)
+  const [purchaseImportResults, setPurchaseImportResults] = useState<{ orders: number; items: number; errors: string[] } | null>(null)
+  const purchaseFileRef = useRef<HTMLInputElement>(null)
+
   const router = useRouter()
   const supabase = createClient()
   const { toast } = useToast()
@@ -198,6 +204,108 @@ export function PurchasesClient({ initialOrders, products, suppliers: initialSup
     e.target.value = ''
   }
 
+  function downloadPurchaseTemplate() {
+    const csv = 'fecha,proveedor,sku,cantidad,costo_unitario,moneda\n2026-07-01,Distribuidora Lima SAC,HDMI-2M,10,15.50,PEN\n2026-07-01,Distribuidora Lima SAC,USB-C-1M,5,8.00,PEN'
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = 'plantilla_compras.csv'; a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  async function handleImportPurchases(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setPurchaseImporting(true)
+    setPurchaseImportResults(null)
+    setPurchaseImportProgress(null)
+
+    const text = await file.text()
+    const lines = text.trim().split('\n')
+    const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/"/g, ''))
+    const rows = lines.slice(1).map(line => {
+      const values = line.split(',').map(v => v.trim().replace(/"/g, ''))
+      const row: Record<string, string> = {}
+      headers.forEach((h, i) => { row[h] = values[i] ?? '' })
+      return row
+    }).filter(r => r.sku && r.cantidad)
+
+    // Agrupar por (fecha + proveedor) → una OC por grupo
+    const groups = new Map<string, typeof rows>()
+    for (const row of rows) {
+      const key = `${row.fecha ?? ''}||${row.proveedor ?? ''}`
+      if (!groups.has(key)) groups.set(key, [])
+      groups.get(key)!.push(row)
+    }
+
+    // Cargar todos los productos para resolver SKU → id
+    const { data: allProducts } = await supabase.from('products').select('id,sku')
+    const skuMap = new Map<string, string>()
+    allProducts?.forEach(p => skuMap.set(p.sku.toUpperCase(), p.id))
+
+    const groupList = Array.from(groups.entries())
+    let totalOrders = 0
+    let totalItems = 0
+    const errors: string[] = []
+
+    setPurchaseImportProgress({ current: 0, total: groupList.length, label: 'Iniciando...' })
+
+    for (let gi = 0; gi < groupList.length; gi++) {
+      const [key, groupRows] = groupList[gi]
+      const [fecha, proveedor] = key.split('||')
+      const currency = (groupRows[0]?.moneda ?? 'PEN').toUpperCase() as 'PEN' | 'USD'
+      const exchangeRate = currency === 'USD' ? 3.75 : 1
+
+      setPurchaseImportProgress({ current: gi, total: groupList.length, label: `Creando OC ${gi + 1}/${groupList.length}: ${proveedor}` })
+
+      // Resolver ítems
+      const itemsPayload: { product_id: string; quantity: number; unit_cost_original: number; unit_cost_pen: number }[] = []
+      for (const row of groupRows) {
+        const sku = (row.sku ?? '').trim().toUpperCase()
+        const productId = skuMap.get(sku)
+        if (!productId) { errors.push(`SKU no encontrado: ${sku}`); continue }
+        const qty = Number(row.cantidad) || 0
+        const cost = Number(row.costo_unitario) || 0
+        if (qty <= 0 || cost <= 0) { errors.push(`Fila inválida: ${sku}`); continue }
+        itemsPayload.push({ product_id: productId, quantity: qty, unit_cost_original: cost, unit_cost_pen: cost * exchangeRate })
+      }
+      if (itemsPayload.length === 0) { errors.push(`Grupo "${proveedor}" sin ítems válidos`); continue }
+
+      const subtotal = itemsPayload.reduce((s, i) => s + i.quantity * i.unit_cost_pen, 0)
+
+      // Número secuencial
+      const { data: seqData } = await supabase.rpc('nextval_purchase_order')
+      const orderNumber = `OC-${String(seqData ?? Date.now()).padStart(6, '0')}`
+
+      // Crear OC
+      const { data: order, error: orderErr } = await supabase
+        .from('purchase_orders')
+        .insert({ order_number: orderNumber, supplier_name: proveedor || 'Sin proveedor', order_date: fecha || new Date().toISOString().split('T')[0], currency, exchange_rate: exchangeRate, subtotal_original: subtotal, subtotal_pen: subtotal })
+        .select().single()
+
+      if (orderErr || !order) { errors.push(`OC "${proveedor}": ${orderErr?.message}`); continue }
+
+      // Insertar ítems
+      const { error: itemsErr } = await supabase.from('purchase_order_items').insert(
+        itemsPayload.map(i => ({ ...i, purchase_order_id: order.id, total_cost_pen: i.quantity * i.unit_cost_pen }))
+      )
+      if (itemsErr) { errors.push(`Ítems OC "${proveedor}": ${itemsErr.message}`); continue }
+
+      // Recibir automáticamente → genera inventory_lots y actualiza stock
+      const { error: receiveErr } = await supabase.rpc('receive_purchase_order', { p_order_id: order.id })
+      if (receiveErr) { errors.push(`Recepción OC "${proveedor}": ${receiveErr.message}`); continue }
+
+      totalOrders++
+      totalItems += itemsPayload.length
+    }
+
+    setPurchaseImportProgress({ current: groupList.length, total: groupList.length, label: 'Completado' })
+    setTimeout(() => setPurchaseImportProgress(null), 800)
+    setPurchaseImportResults({ orders: totalOrders, items: totalItems, errors })
+    setPurchaseImporting(false)
+    if (totalOrders > 0) router.refresh()
+    e.target.value = ''
+  }
+
   function downloadSupplierTemplate() {
     const csv = 'name,ruc,contact,phone,email\nProveedor SAC,20123456789,Juan García,999999999,ventas@proveedor.com'
     const blob = new Blob([csv], { type: 'text/csv' })
@@ -216,14 +324,44 @@ export function PurchasesClient({ initialOrders, products, suppliers: initialSup
 
   return (
     <>
-      <div className="flex justify-end gap-2">
+      <div className="flex justify-end gap-2 flex-wrap">
         <Button variant="outline" onClick={() => setSupplierOpen(true)}>
           <Building2 className="h-4 w-4 mr-2" /> Gestionar Proveedores
         </Button>
+        <Button variant="outline" onClick={downloadPurchaseTemplate}>
+          <Download className="h-4 w-4 mr-2" /> Plantilla Compras
+        </Button>
+        <Button variant="outline" onClick={() => purchaseFileRef.current?.click()} disabled={purchaseImporting}>
+          <Upload className="h-4 w-4 mr-2" /> {purchaseImporting ? 'Importando...' : 'Importar Compras CSV'}
+        </Button>
+        <input ref={purchaseFileRef} type="file" accept=".csv,.txt" className="hidden" onChange={handleImportPurchases} />
         <Button onClick={() => { resetForm(); setOpen(true) }}>
           <Plus className="h-4 w-4 mr-2" /> Nueva Orden de Compra
         </Button>
       </div>
+
+      {purchaseImportProgress && (
+        <div className="rounded-lg border bg-white p-4 space-y-2">
+          <div className="flex justify-between text-sm text-gray-600">
+            <span className="truncate pr-4">{purchaseImportProgress.label}</span>
+            <span className="font-medium shrink-0">{purchaseImportProgress.current} / {purchaseImportProgress.total}</span>
+          </div>
+          <div className="w-full bg-gray-100 rounded-full h-2.5">
+            <div
+              className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+              style={{ width: `${Math.round((purchaseImportProgress.current / purchaseImportProgress.total) * 100)}%` }}
+            />
+          </div>
+          <p className="text-xs text-gray-400 text-right">{Math.round((purchaseImportProgress.current / purchaseImportProgress.total) * 100)}%</p>
+        </div>
+      )}
+
+      {purchaseImportResults && !purchaseImportProgress && (
+        <div className={`rounded-lg p-3 text-sm ${purchaseImportResults.errors.length > 0 ? 'bg-yellow-50 border border-yellow-200' : 'bg-green-50 border border-green-200'}`}>
+          <p className="font-medium">{purchaseImportResults.orders} órdenes de compra creadas y recibidas — {purchaseImportResults.items} ítems en inventario</p>
+          {purchaseImportResults.errors.slice(0, 5).map((e, i) => <p key={i} className="text-red-600 text-xs mt-1">{e}</p>)}
+        </div>
+      )}
 
       <div className="bg-white rounded-lg border">
         <Table>
