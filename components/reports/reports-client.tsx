@@ -14,13 +14,19 @@ import type { SalesSummary, TopProduct, InventoryStatus } from '@/types'
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#84cc16', '#f97316']
 
+interface TopCustomer {
+  id: string; name: string; document_type: string; document_number: string
+  total_sales: number; total_revenue_pen: number; total_profit_pen: number; profit_margin: number
+}
+
 interface Props {
   salesSummary: SalesSummary[]
   topProducts: TopProduct[]
   inventory: InventoryStatus[]
+  topCustomers: TopCustomer[]
 }
 
-export function ReportsClient({ salesSummary, topProducts, inventory }: Props) {
+export function ReportsClient({ salesSummary, topProducts, inventory, topCustomers }: Props) {
   const [period, setPeriod] = useState<'7' | '30' | '90'>('30')
 
   const periodDays = Number(period)
@@ -140,6 +146,80 @@ export function ReportsClient({ salesSummary, topProducts, inventory }: Props) {
         </Card>
 
         <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Top Clientes — Mayor Facturación</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>#</TableHead>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead className="text-center">Ventas</TableHead>
+                    <TableHead className="text-right">Facturación</TableHead>
+                    <TableHead className="text-right">Utilidad</TableHead>
+                    <TableHead className="text-center">Margen</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {topCustomers.length === 0 ? (
+                    <TableRow><TableCell colSpan={6} className="text-center py-4 text-gray-400 text-sm">Sin datos aún</TableCell></TableRow>
+                  ) : topCustomers.slice(0, 10).map((c, i) => (
+                    <TableRow key={c.id}>
+                      <TableCell className="text-gray-400 text-sm">{i + 1}</TableCell>
+                      <TableCell>
+                        <div className="font-medium text-sm">{c.name}</div>
+                        <div className="text-xs text-gray-400">{c.document_type}: {c.document_number}</div>
+                      </TableCell>
+                      <TableCell className="text-center text-sm">{c.total_sales}</TableCell>
+                      <TableCell className="text-right font-medium text-sm">{formatCurrency(Number(c.total_revenue_pen))}</TableCell>
+                      <TableCell className="text-right text-sm text-green-700">{formatCurrency(Number(c.total_profit_pen))}</TableCell>
+                      <TableCell className="text-center">
+                        <Badge variant={Number(c.profit_margin) > 0.2 ? 'success' : 'warning'}>{formatPercent(Number(c.profit_margin))}</Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Top Clientes — Más Rentables</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>#</TableHead>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead className="text-right">Utilidad</TableHead>
+                    <TableHead className="text-center">Margen</TableHead>
+                    <TableHead className="text-right">Facturación</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {[...topCustomers].sort((a, b) => Number(b.total_profit_pen) - Number(a.total_profit_pen)).slice(0, 10).map((c, i) => (
+                    <TableRow key={c.id}>
+                      <TableCell className="text-gray-400 text-sm">{i + 1}</TableCell>
+                      <TableCell>
+                        <div className="font-medium text-sm">{c.name}</div>
+                        <div className="text-xs text-gray-400">{c.document_type}: {c.document_number}</div>
+                      </TableCell>
+                      <TableCell className="text-right font-semibold text-green-700 text-sm">{formatCurrency(Number(c.total_profit_pen))}</TableCell>
+                      <TableCell className="text-center">
+                        <Badge variant={Number(c.profit_margin) > 0.2 ? 'success' : 'warning'}>{formatPercent(Number(c.profit_margin))}</Badge>
+                      </TableCell>
+                      <TableCell className="text-right text-sm text-gray-500">{formatCurrency(Number(c.total_revenue_pen))}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Distribución de Ventas</CardTitle>

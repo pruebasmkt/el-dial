@@ -5,10 +5,11 @@ export const revalidate = 0
 
 export default async function ReportsPage() {
   const supabase = await createClient()
-  const [{ data: salesSummary }, { data: topProducts }, { data: inventory }] = await Promise.all([
+  const [{ data: salesSummary }, { data: topProducts }, { data: inventory }, { data: topCustomers }] = await Promise.all([
     supabase.from('v_sales_summary').select('*').order('day', { ascending: false }).limit(90),
     supabase.from('v_top_products').select('*').limit(20),
     supabase.from('v_inventory_status').select('*').order('inventory_value_pen', { ascending: false }).limit(20),
+    supabase.from('v_top_customers').select('*').order('total_revenue_pen', { ascending: false }).limit(20),
   ])
 
   return (
@@ -21,6 +22,7 @@ export default async function ReportsPage() {
         salesSummary={salesSummary ?? []}
         topProducts={topProducts ?? []}
         inventory={inventory ?? []}
+        topCustomers={topCustomers ?? []}
       />
     </div>
   )

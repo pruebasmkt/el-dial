@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
 import {
   LayoutDashboard, Package, ShoppingCart, TrendingUp,
-  Boxes, BarChart3, Zap, LogOut, AlertTriangle,
+  Boxes, BarChart3, Zap, LogOut, AlertTriangle, Users,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
@@ -14,6 +14,7 @@ const navItems = [
   { href: '/products', label: 'Productos', icon: Package },
   { href: '/purchases', label: 'Compras', icon: ShoppingCart },
   { href: '/sales', label: 'Ventas', icon: TrendingUp },
+  { href: '/customers', label: 'Clientes', icon: Users },
   { href: '/inventory', label: 'Inventario', icon: Boxes },
   { href: '/reports', label: 'Reportes', icon: BarChart3 },
 ]
