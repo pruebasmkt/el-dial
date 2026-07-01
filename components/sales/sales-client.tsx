@@ -128,10 +128,35 @@ export function SalesClient({ initialSales, availableProducts, initialCustomers 
 
   const subtotalOriginal = items.reduce((s, i) => s + i.quantity * i.unit_price, 0)
   const subtotalPen = convertToSoles(subtotalOriginal, currency, exchangeRate)
-  const estimatedCost = items.reduce((s, i) => {
-    const prod = availableProducts.find(p => p.id === i.product_id)
-    return s + i.quantity * (prod?.avg_cost_pen ?? 0)
-  }, 0)
+
+  // Simulación FIFO por producto: distribuye cantidad pedida entre lotes disponibles
+  function simulateFifo(productId: string, quantity: number, unitPricePen: number) {
+    const lots = lotsCache[productId] ?? []
+    const result: { lot_num: number; qty: number; unit_cost_pen: number; revenue: number; cost: number; profit: number; isLoss: boolean }[] = []
+    let remaining = quantity
+    for (const lot of lots) {
+      if (remaining <= 0) break
+      const used = Math.min(remaining, lot.quantity_remaining)
+      const revenue = used * unitPricePen
+      const cost = used * lot.unit_cost_pen
+      result.push({ lot_num: lot.lot_num, qty: used, unit_cost_pen: lot.unit_cost_pen, revenue, cost, profit: revenue - cost, isLoss: lot.unit_cost_pen > unitPricePen })
+      remaining -= used
+    }
+    return result
+  }
+
+  // Calcular costo FIFO real si hay lotes cargados, sino usar promedio
+  const itemsWithFifo = items.map(i => {
+    const unitPricePen = convertToSoles(i.unit_price, currency, exchangeRate)
+    const fifoRows = i.product_id && lotsCache[i.product_id] ? simulateFifo(i.product_id, i.quantity, unitPricePen) : []
+    const fifoAvailable = fifoRows.length > 0
+    const estimatedCostItem = fifoAvailable
+      ? fifoRows.reduce((s, r) => s + r.cost, 0)
+      : i.quantity * (availableProducts.find(p => p.id === i.product_id)?.avg_cost_pen ?? 0)
+    return { ...i, unitPricePen, fifoRows, fifoAvailable, estimatedCostItem }
+  })
+
+  const estimatedCost = itemsWithFifo.reduce((s, i) => s + i.estimatedCostItem, 0)
   const estimatedProfit = subtotalPen - estimatedCost
   const estimatedMargin = subtotalPen > 0 ? estimatedProfit / subtotalPen : 0
 
@@ -312,54 +337,72 @@ export function SalesClient({ initialSales, availableProducts, initialCustomers 
                   <Plus className="h-3 w-3 mr-1" /> Agregar
                 </Button>
               </div>
-              {items.map((item, idx) => {
+              {itemsWithFifo.map((item, idx) => {
                 const prod = availableProducts.find(p => p.id === item.product_id)
                 return (
-                  <div key={idx} className="grid grid-cols-12 gap-2 items-end">
-                    <div className="col-span-5 space-y-1">
-                      {idx === 0 && <Label className="text-xs">Producto (nombre o SKU)</Label>}
-                      <Combobox
-                        options={productOptions}
-                        value={item.product_id}
-                        onSelect={v => handleProductSelect(idx, v)}
-                        placeholder="Buscar producto..."
-                      />
-                      {prod && (
-                        <div className="text-xs text-gray-400">
-                          Stock: {prod.current_stock} · Costo prom: {formatCurrency(prod.avg_cost_pen)}
-                        </div>
-                      )}
-                      {item.product_id && lotsCache[item.product_id] && (
-                        <div className="flex flex-wrap gap-1 mt-0.5">
-                          {lotsCache[item.product_id].map(lot => (
-                            <span key={lot.lot_num} className="inline-flex items-center gap-1 bg-amber-50 border border-amber-200 text-amber-800 rounded px-1.5 py-0.5 text-[10px] font-mono">
-                              LT-{String(lot.lot_num).padStart(2,'0')}
-                              <span className="text-amber-600">{formatCurrency(lot.unit_cost_pen)}</span>
-                              <span className="text-gray-400">({lot.quantity_remaining}u)</span>
+                  <div key={idx} className="space-y-1">
+                    <div className="grid grid-cols-12 gap-2 items-end">
+                      <div className="col-span-5 space-y-1">
+                        {idx === 0 && <Label className="text-xs">Producto (nombre o SKU)</Label>}
+                        <Combobox
+                          options={productOptions}
+                          value={item.product_id}
+                          onSelect={v => handleProductSelect(idx, v)}
+                          placeholder="Buscar producto..."
+                        />
+                        {prod && (
+                          <div className="text-xs text-gray-400">
+                            Stock: {prod.current_stock} · Costo prom: {formatCurrency(prod.avg_cost_pen)}
+                          </div>
+                        )}
+                      </div>
+                      <div className="col-span-2 space-y-1">
+                        {idx === 0 && <Label className="text-xs">Cantidad</Label>}
+                        <Input type="number" min={1} max={prod?.current_stock} value={item.quantity}
+                          onChange={e => updateItem(idx, 'quantity', Number(e.target.value))} />
+                      </div>
+                      <div className="col-span-3 space-y-1">
+                        {idx === 0 && <Label className="text-xs">Precio unit. ({currency === 'USD' ? '$' : 'S/'})</Label>}
+                        <Input type="number" min={0} step="0.01" value={item.unit_price}
+                          onChange={e => updateItem(idx, 'unit_price', Number(e.target.value))} />
+                      </div>
+                      <div className="col-span-2">
+                        <Button type="button" variant="ghost" size="icon" onClick={() => removeItem(idx)} disabled={items.length === 1}>
+                          <Trash2 className="h-4 w-4 text-red-400" />
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* Desglose FIFO por lote */}
+                    {item.fifoRows.length > 0 && (
+                      <div className="ml-1 border-l-2 border-amber-200 pl-3 space-y-0.5">
+                        {item.fifoRows.map(row => (
+                          <div key={row.lot_num} className={`flex items-center justify-between text-[11px] font-mono rounded px-2 py-0.5 ${row.isLoss ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-800'}`}>
+                            <span className="font-semibold">LT-{String(row.lot_num).padStart(2,'0')}</span>
+                            <span>{row.qty}u × {formatCurrency(row.unit_cost_pen)}</span>
+                            <span>costo: {formatCurrency(row.cost)}</span>
+                            <span className={row.isLoss ? 'text-red-600 font-bold' : 'text-green-700'}>
+                              util: {formatCurrency(row.profit)}
                             </span>
-                          ))}
+                            {row.isLoss && <span className="text-red-600 font-bold">⚠ bajo costo</span>}
+                          </div>
+                        ))}
+                        <div className="flex justify-between text-[11px] text-gray-500 px-2 pt-0.5 border-t border-amber-100">
+                          <span>Subtotal producto</span>
+                          <span className="font-semibold">venta: {formatCurrency(item.fifoRows.reduce((s,r)=>s+r.revenue,0))}</span>
+                          <span>costo: {formatCurrency(item.estimatedCostItem)}</span>
+                          <span className={item.fifoRows.reduce((s,r)=>s+r.profit,0) < 0 ? 'text-red-600 font-bold' : 'text-green-700 font-semibold'}>
+                            util: {formatCurrency(item.fifoRows.reduce((s,r)=>s+r.profit,0))}
+                          </span>
                         </div>
-                      )}
-                    </div>
-                    <div className="col-span-2 space-y-1">
-                      {idx === 0 && <Label className="text-xs">Cantidad</Label>}
-                      <Input type="number" min={1} max={prod?.current_stock} value={item.quantity} onChange={e => updateItem(idx, 'quantity', Number(e.target.value))} />
-                    </div>
-                    <div className="col-span-3 space-y-1">
-                      {idx === 0 && <Label className="text-xs">Precio unit. ({currency === 'USD' ? '$' : 'S/'})</Label>}
-                      <Input type="number" min={0} step="0.01" value={item.unit_price} onChange={e => updateItem(idx, 'unit_price', Number(e.target.value))} />
-                    </div>
-                    <div className="col-span-2">
-                      <Button type="button" variant="ghost" size="icon" onClick={() => removeItem(idx)} disabled={items.length === 1}>
-                        <Trash2 className="h-4 w-4 text-red-400" />
-                      </Button>
-                    </div>
+                      </div>
+                    )}
                   </div>
                 )
               })}
             </div>
 
-            <Card className="bg-green-50 border-green-100">
+            <Card className={estimatedProfit < 0 ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-100'}>
               <CardContent className="pt-4 pb-3 space-y-1 text-sm">
                 <div className="flex justify-between">
                   <span>Subtotal venta:</span>
@@ -369,7 +412,7 @@ export function SalesClient({ initialSales, availableProducts, initialCustomers 
                   <span>Costo estimado (FIFO):</span>
                   <span>{formatCurrency(estimatedCost)}</span>
                 </div>
-                <div className="flex justify-between font-bold text-green-700 border-t border-green-200 pt-1">
+                <div className={`flex justify-between font-bold border-t pt-1 ${estimatedProfit < 0 ? 'text-red-600 border-red-200' : 'text-green-700 border-green-200'}`}>
                   <span>Utilidad estimada:</span>
                   <span>{formatCurrency(estimatedProfit)} ({formatPercent(estimatedMargin)})</span>
                 </div>
