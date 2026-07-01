@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Card, CardContent } from '@/components/ui/card'
-import { Plus, Trash2, TrendingUp, Eye, UserPlus, Search, X } from 'lucide-react'
+import { Plus, Trash2, TrendingUp, Eye, UserPlus, Search, X, Loader2 } from 'lucide-react'
 import { formatCurrency, formatDateTime, formatPercent, convertToSoles } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
 import type { Sale, Currency } from '@/types'
@@ -47,8 +47,9 @@ export function SalesClient({ initialSales, availableProducts, initialCustomers 
   const [docQuery, setDocQuery] = useState('')
   const [docType, setDocType] = useState<'DNI' | 'RUC'>('DNI')
   const [newCustomerOpen, setNewCustomerOpen] = useState(false)
-  const [newCustomerForm, setNewCustomerForm] = useState({ name: '', email: '', phone: '' })
+  const [newCustomerForm, setNewCustomerForm] = useState({ name: '', email: '', phone: '', address: '' })
   const [customerLoading, setCustomerLoading] = useState(false)
+  const [consultaLoading, setConsultaLoading] = useState(false)
 
   const router = useRouter()
   const supabase = createClient()
@@ -64,14 +65,31 @@ export function SalesClient({ initialSales, availableProducts, initialCustomers 
     c => c.document_type === docType && c.document_number === docQuery.trim()
   )
 
-  function handleDocSearch() {
+  async function handleDocSearch() {
     if (!docQuery.trim()) return
     if (matchedCustomer) {
       setSelectedCustomer(matchedCustomer)
-    } else {
-      setNewCustomerOpen(true)
-      setNewCustomerForm({ name: '', email: '', phone: '' })
+      return
     }
+    // Consultar RENIEC/SUNAT via apiperu.dev
+    setConsultaLoading(true)
+    try {
+      const res = await fetch(`/api/consulta-documento?documento=${docQuery.trim()}`)
+      const data = await res.json()
+      if (res.ok && data.nombre) {
+        const nombreCompleto = data.tipo === 'DNI'
+          ? `${data.nombre} ${data.apellidos ?? ''}`.trim()
+          : data.nombre
+        setNewCustomerForm({ name: nombreCompleto, email: '', phone: '', address: data.direccion ?? '' })
+        toast({ title: `${data.tipo === 'DNI' ? 'RENIEC' : 'SUNAT'}: ${nombreCompleto}`, description: 'Datos precargados — revisa y confirma', variant: 'success' })
+      } else {
+        setNewCustomerForm({ name: '', email: '', phone: '', address: '' })
+      }
+    } catch {
+      setNewCustomerForm({ name: '', email: '', phone: '', address: '' })
+    }
+    setConsultaLoading(false)
+    setNewCustomerOpen(true)
   }
 
   function clearCustomer() {
@@ -88,6 +106,7 @@ export function SalesClient({ initialSales, availableProducts, initialCustomers 
       name: newCustomerForm.name.trim(),
       email: newCustomerForm.email.trim() || null,
       phone: newCustomerForm.phone.trim() || null,
+      address: newCustomerForm.address.trim() || null,
     }).select().single()
 
     if (error) {
@@ -293,8 +312,10 @@ export function SalesClient({ initialSales, availableProducts, initialCustomers 
                       className="flex-1"
                       maxLength={docType === 'DNI' ? 8 : 11}
                     />
-                    <Button variant="outline" onClick={handleDocSearch} disabled={!docQuery.trim()}>
-                      <Search className="h-4 w-4 mr-1" /> Buscar
+                    <Button variant="outline" onClick={handleDocSearch} disabled={!docQuery.trim() || consultaLoading}>
+                      {consultaLoading
+                        ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Consultando...</>
+                        : <><Search className="h-4 w-4 mr-1" /> Buscar</>}
                     </Button>
                   </div>
                   {docQuery && matchedCustomer && (
@@ -440,8 +461,11 @@ export function SalesClient({ initialSales, availableProducts, initialCustomers 
             <DialogTitle><UserPlus className="inline h-4 w-4 mr-2" />Nuevo Cliente</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
-            <div className="bg-blue-50 border border-blue-200 rounded px-3 py-2 text-sm">
-              <span className="font-medium">{docType}:</span> {docQuery} — no encontrado en base de datos
+            <div className={`rounded px-3 py-2 text-sm border ${newCustomerForm.name ? 'bg-green-50 border-green-200' : 'bg-blue-50 border-blue-200'}`}>
+              <span className="font-medium">{docType}:</span> {docQuery}
+              {newCustomerForm.name
+                ? <span className="text-green-700 ml-2">✓ Datos obtenidos de {docType === 'DNI' ? 'RENIEC' : 'SUNAT'}</span>
+                : <span className="text-gray-500 ml-2">— no encontrado, ingresa manualmente</span>}
             </div>
             <div className="space-y-1.5">
               <Label>Nombre / Razón Social *</Label>
@@ -456,6 +480,10 @@ export function SalesClient({ initialSales, availableProducts, initialCustomers 
                 <Label>Email</Label>
                 <Input placeholder="correo@email.com" value={newCustomerForm.email} onChange={e => setNewCustomerForm(f => ({ ...f, email: e.target.value }))} />
               </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Dirección</Label>
+              <Input placeholder="Av. Lima 123" value={newCustomerForm.address} onChange={e => setNewCustomerForm(f => ({ ...f, address: e.target.value }))} />
             </div>
           </div>
           <DialogFooter>
