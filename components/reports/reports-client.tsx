@@ -1,8 +1,9 @@
 "use client"
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell, Legend,
@@ -10,6 +11,7 @@ import {
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { formatCurrency, formatPercent } from '@/lib/utils'
+import { Printer, AlertTriangle, TrendingUp, Package } from 'lucide-react'
 import type { SalesSummary, TopProduct, InventoryStatus } from '@/types'
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#84cc16', '#f97316']
@@ -19,15 +21,54 @@ interface TopCustomer {
   total_sales: number; total_revenue_pen: number; total_profit_pen: number; profit_margin: number
 }
 
+interface LowStockItem {
+  id: string; sku: string; name: string; unit: string
+  current_stock: number; min_stock: number; stock_diff: number
+  last_purchase_price: number | null; last_purchase_date: string | null
+  last_supplier: string | null; supplier_phone: string | null
+  supplier_email: string | null; supplier_contact: string | null
+}
+
 interface Props {
   salesSummary: SalesSummary[]
   topProducts: TopProduct[]
   inventory: InventoryStatus[]
   topCustomers: TopCustomer[]
+  lowStock: LowStockItem[]
 }
 
-export function ReportsClient({ salesSummary, topProducts, inventory, topCustomers }: Props) {
+export function ReportsClient({ salesSummary, topProducts, inventory, topCustomers, lowStock }: Props) {
+  const [tab, setTab] = useState<'ventas' | 'inventario'>('ventas')
   const [period, setPeriod] = useState<'7' | '30' | '90'>('30')
+  const printRef = useRef<HTMLDivElement>(null)
+
+  function handlePrint() {
+    const content = printRef.current
+    if (!content) return
+    const win = window.open('', '_blank', 'width=900,height=700')
+    if (!win) return
+    win.document.write(`
+      <html><head><title>Reporte Stock Bajo — El Dial</title>
+      <style>
+        body { font-family: Arial, sans-serif; font-size: 12px; padding: 20px; color: #111; }
+        h1 { font-size: 18px; margin-bottom: 4px; }
+        p.sub { color: #666; margin-bottom: 16px; font-size: 11px; }
+        table { width: 100%; border-collapse: collapse; }
+        th { background: #1e3a5f; color: white; padding: 7px 10px; text-align: left; font-size: 11px; }
+        td { padding: 6px 10px; border-bottom: 1px solid #e5e7eb; font-size: 11px; }
+        tr:nth-child(even) td { background: #f9fafb; }
+        .critico { color: #dc2626; font-weight: bold; }
+        .badge-rojo { background: #fee2e2; color: #dc2626; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
+        .badge-amarillo { background: #fef9c3; color: #92400e; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
+        @media print { body { padding: 0; } }
+      </style></head><body>
+      ${content.innerHTML}
+      </body></html>
+    `)
+    win.document.close()
+    win.focus()
+    setTimeout(() => { win.print(); win.close() }, 400)
+  }
 
   const periodDays = Number(period)
   const slicedSummary = salesSummary.slice(0, periodDays)
@@ -53,6 +94,114 @@ export function ReportsClient({ salesSummary, topProducts, inventory, topCustome
 
   return (
     <div className="space-y-6">
+      {/* Pestañas principales */}
+      <div className="flex gap-1 border-b">
+        <button
+          onClick={() => setTab('ventas')}
+          className={`flex items-center gap-2 px-5 py-2.5 text-sm font-medium border-b-2 transition-colors ${tab === 'ventas' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+        >
+          <TrendingUp className="h-4 w-4" /> Ventas y Rentabilidad
+        </button>
+        <button
+          onClick={() => setTab('inventario')}
+          className={`flex items-center gap-2 px-5 py-2.5 text-sm font-medium border-b-2 transition-colors ${tab === 'inventario' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+        >
+          <Package className="h-4 w-4" /> Inventario
+          {lowStock.length > 0 && (
+            <span className="bg-red-500 text-white text-xs font-bold px-1.5 py-0.5 rounded-full">{lowStock.length}</span>
+          )}
+        </button>
+      </div>
+
+      {/* ── TAB INVENTARIO ── */}
+      {tab === 'inventario' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-semibold">Productos con Stock Bajo</h2>
+              <p className="text-sm text-gray-500">{lowStock.length} productos por debajo del stock mínimo</p>
+            </div>
+            <Button onClick={handlePrint} variant="outline" className="gap-2">
+              <Printer className="h-4 w-4" /> Imprimir reporte
+            </Button>
+          </div>
+
+          {/* Contenido imprimible */}
+          <div ref={printRef}>
+            <h1 style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 4 }}>El Dial — Reporte de Stock Bajo</h1>
+            <p className="sub" style={{ color: '#666', marginBottom: 16, fontSize: 11 }}>
+              Generado el {format(new Date(), "dd 'de' MMMM yyyy, HH:mm", { locale: es })} · {lowStock.length} productos bajo mínimo
+            </p>
+
+            <div className="bg-white rounded-lg border overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-blue-900">
+                    <TableHead className="text-white">SKU</TableHead>
+                    <TableHead className="text-white">Producto</TableHead>
+                    <TableHead className="text-white text-center">Stock Actual</TableHead>
+                    <TableHead className="text-white text-center">Stock Mínimo</TableHead>
+                    <TableHead className="text-white text-center">Déficit</TableHead>
+                    <TableHead className="text-white text-right">Últ. Precio Compra</TableHead>
+                    <TableHead className="text-white">Último Proveedor</TableHead>
+                    <TableHead className="text-white">Contacto</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {lowStock.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="text-center py-10 text-gray-400">
+                        <Package className="h-8 w-8 mx-auto mb-2 opacity-40" />
+                        Todos los productos tienen stock suficiente
+                      </TableCell>
+                    </TableRow>
+                  ) : lowStock.map(item => {
+                    const critico = item.current_stock === 0
+                    return (
+                      <TableRow key={item.id} className={critico ? 'bg-red-50' : ''}>
+                        <TableCell className="font-mono text-xs text-gray-500">{item.sku}</TableCell>
+                        <TableCell>
+                          <div className="font-medium text-sm">{item.name}</div>
+                          {critico && <span className="inline-flex items-center gap-1 text-xs text-red-600 font-semibold"><AlertTriangle className="h-3 w-3" /> Sin stock</span>}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <span className={`font-bold ${critico ? 'text-red-600' : 'text-orange-600'}`}>
+                            {item.current_stock} {item.unit}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-center text-gray-600">{item.min_stock} {item.unit}</TableCell>
+                        <TableCell className="text-center">
+                          <Badge className={critico ? 'bg-red-100 text-red-700 border-red-200' : 'bg-orange-100 text-orange-700 border-orange-200'}>
+                            {item.stock_diff} {item.unit}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right font-medium">
+                          {item.last_purchase_price ? formatCurrency(Number(item.last_purchase_price)) : '—'}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          <div className="font-medium">{item.last_supplier ?? '—'}</div>
+                          {item.last_purchase_date && (
+                            <div className="text-xs text-gray-400">{format(new Date(item.last_purchase_date), 'dd/MM/yyyy')}</div>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {item.supplier_contact && <div className="font-medium">{item.supplier_contact}</div>}
+                          {item.supplier_phone && <div className="text-xs text-gray-500">{item.supplier_phone}</div>}
+                          {item.supplier_email && <div className="text-xs text-blue-600">{item.supplier_email}</div>}
+                          {!item.supplier_contact && !item.supplier_phone && !item.supplier_email && <span className="text-gray-400">—</span>}
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── TAB VENTAS ── */}
+      {tab === 'ventas' && <>
       {/* Selector de período */}
       <div className="flex gap-2">
         {(['7', '30', '90'] as const).map(p => (
@@ -263,6 +412,7 @@ export function ReportsClient({ salesSummary, topProducts, inventory, topCustome
           </Card>
         </div>
       </div>
+      </> }
     </div>
   )
 }
