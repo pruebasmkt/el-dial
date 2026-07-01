@@ -619,41 +619,45 @@ export function PurchasesClient({ initialOrders, products, suppliers: initialSup
       {/* Dialog detalle */}
       {detailOrder && (
         <Dialog open={!!detailOrder} onOpenChange={() => setDetailOrder(null)}>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader>
+          <DialogContent className="max-w-3xl w-full flex flex-col" style={{ maxHeight: '90vh' }}>
+            <DialogHeader className="shrink-0">
               <DialogTitle>Orden {detailOrder.order_number}</DialogTitle>
             </DialogHeader>
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div><span className="text-gray-500">Proveedor:</span> <span className="font-medium">{detailOrder.supplier_name}</span></div>
-                <div><span className="text-gray-500">Fecha:</span> <span className="font-medium">{formatDate(detailOrder.order_date)}</span></div>
-                <div><span className="text-gray-500">Moneda:</span> <Badge variant="outline">{detailOrder.currency}</Badge></div>
-                <div><span className="text-gray-500">Estado:</span> <Badge className={PO_STATUS_COLORS[detailOrder.status]}>{PO_STATUS_LABELS[detailOrder.status]}</Badge></div>
-              </div>
+
+            {/* Info fija */}
+            <div className="shrink-0 grid grid-cols-2 gap-3 text-sm pb-3 border-b">
+              <div><span className="text-gray-500">Proveedor: </span><span className="font-medium">{detailOrder.supplier_name}</span></div>
+              <div><span className="text-gray-500">Fecha: </span><span className="font-medium">{formatDate(detailOrder.order_date)}</span></div>
+              <div className="flex items-center gap-2"><span className="text-gray-500">Moneda:</span><Badge variant="outline">{detailOrder.currency}</Badge></div>
+              <div className="flex items-center gap-2"><span className="text-gray-500">Estado:</span><Badge className={PO_STATUS_COLORS[detailOrder.status]}>{PO_STATUS_LABELS[detailOrder.status]}</Badge></div>
+              <div><span className="text-gray-500">Ítems: </span><span className="font-medium">{detailOrder.purchase_order_items?.length ?? 0} productos</span></div>
+              <div><span className="text-gray-500">Total: </span><span className="font-bold text-blue-700">{formatCurrency(Number(detailOrder.subtotal_pen))}</span></div>
+            </div>
+
+            {/* Tabla con scroll */}
+            <div className="overflow-y-auto flex-1 min-h-0">
               <Table>
-                <TableHeader>
+                <TableHeader className="sticky top-0 bg-white z-10">
                   <TableRow>
+                    <TableHead>SKU</TableHead>
                     <TableHead>Producto</TableHead>
-                    <TableHead className="text-center">Cant.</TableHead>
-                    <TableHead className="text-right">Costo Unit.</TableHead>
-                    <TableHead className="text-right">Total S/</TableHead>
+                    <TableHead className="text-center w-20">Cant.</TableHead>
+                    <TableHead className="text-right w-28">Costo Unit.</TableHead>
+                    <TableHead className="text-right w-28">Total S/</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {detailOrder.purchase_order_items?.map(item => (
                     <TableRow key={item.id}>
-                      <TableCell>{(item as any).products?.name}</TableCell>
+                      <TableCell className="font-mono text-xs text-gray-500">{(item as any).products?.sku}</TableCell>
+                      <TableCell className="text-sm font-medium">{(item as any).products?.name}</TableCell>
                       <TableCell className="text-center">{item.quantity}</TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-right text-sm">
                         {detailOrder.currency === 'USD' ? `$ ${Number(item.unit_cost_original).toFixed(2)}` : formatCurrency(Number(item.unit_cost_original))}
                       </TableCell>
                       <TableCell className="text-right font-medium">{formatCurrency(Number(item.total_cost_pen))}</TableCell>
                     </TableRow>
                   ))}
-                  <TableRow>
-                    <TableCell colSpan={3} className="text-right font-bold">Total:</TableCell>
-                    <TableCell className="text-right font-bold text-blue-700">{formatCurrency(Number(detailOrder.subtotal_pen))}</TableCell>
-                  </TableRow>
                 </TableBody>
               </Table>
             </div>
