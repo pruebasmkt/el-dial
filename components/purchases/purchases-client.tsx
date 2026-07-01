@@ -1,5 +1,5 @@
 "use client"
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { useToast } from '@/components/ui/use-toast'
@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Card, CardContent } from '@/components/ui/card'
-import { Plus, Trash2, ShoppingCart, Package, Building2, X } from 'lucide-react'
+import { Plus, Trash2, ShoppingCart, Package, Building2, X, Upload, Download } from 'lucide-react'
 import { formatCurrency, formatDate, PO_STATUS_LABELS, PO_STATUS_COLORS, convertToSoles } from '@/lib/utils'
 import type { PurchaseOrder, Product, Supplier, Currency } from '@/types'
 
@@ -43,6 +43,9 @@ export function PurchasesClient({ initialOrders, products, suppliers: initialSup
   const [supplierForm, setSupplierForm] = useState({ name: '', ruc: '', contact: '', phone: '', email: '' })
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null)
   const [supplierLoading, setSupplierLoading] = useState(false)
+  const [supplierImporting, setSupplierImporting] = useState(false)
+  const [supplierImportResults, setSupplierImportResults] = useState<{ ok: number; errors: string[] } | null>(null)
+  const supplierFileRef = useRef<HTMLInputElement>(null)
 
   const router = useRouter()
   const supabase = createClient()
@@ -158,6 +161,49 @@ export function PurchasesClient({ initialOrders, products, suppliers: initialSup
   async function toggleSupplierActive(s: Supplier) {
     await supabase.from('suppliers').update({ is_active: !s.is_active }).eq('id', s.id)
     setSuppliers(prev => prev.map(x => x.id === s.id ? { ...x, is_active: !x.is_active } : x))
+  }
+
+  async function handleImportSuppliers(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setSupplierImporting(true)
+    setSupplierImportResults(null)
+    const text = await file.text()
+    const lines = text.trim().split('\n')
+    const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/"/g, ''))
+    const rows = lines.slice(1).map(line => {
+      const values = line.split(',').map(v => v.trim().replace(/"/g, ''))
+      const row: Record<string, string> = {}
+      headers.forEach((h, i) => { row[h] = values[i] ?? '' })
+      return row
+    }).filter(r => r.name || r.nombre)
+
+    let ok = 0
+    const errors: string[] = []
+    for (const row of rows) {
+      const name = (row.name || row.nombre || '').trim()
+      if (!name) { errors.push(`Fila sin nombre`); continue }
+      const { data, error } = await supabase.from('suppliers').insert({
+        name,
+        ruc: (row.ruc || row.documento)?.trim() || null,
+        contact_name: (row.contact || row.contacto)?.trim() || null,
+        phone: (row.phone || row.telefono)?.trim() || null,
+        email: row.email?.trim() || null,
+      }).select().single()
+      if (error) errors.push(`${name}: ${error.message}`)
+      else { ok++; if (data) setSuppliers(prev => [...prev, data]) }
+    }
+    setSupplierImportResults({ ok, errors })
+    setSupplierImporting(false)
+    e.target.value = ''
+  }
+
+  function downloadSupplierTemplate() {
+    const csv = 'name,ruc,contact,phone,email\nProveedor SAC,20123456789,Juan García,999999999,ventas@proveedor.com'
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = 'plantilla_proveedores.csv'; a.click()
+    URL.revokeObjectURL(url)
   }
 
   function openEditSupplier(s: Supplier) {
@@ -339,6 +385,21 @@ export function PurchasesClient({ initialOrders, products, suppliers: initialSup
             <DialogTitle>Gestionar Proveedores</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" size="sm" onClick={downloadSupplierTemplate}>
+                <Download className="h-3.5 w-3.5 mr-1" /> Plantilla CSV
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => supplierFileRef.current?.click()} disabled={supplierImporting}>
+                <Upload className="h-3.5 w-3.5 mr-1" /> {supplierImporting ? 'Importando...' : 'Importar CSV'}
+              </Button>
+              <input ref={supplierFileRef} type="file" accept=".csv,.txt" className="hidden" onChange={handleImportSuppliers} />
+            </div>
+            {supplierImportResults && (
+              <div className={`rounded-lg p-3 text-sm ${supplierImportResults.errors.length > 0 ? 'bg-yellow-50 border border-yellow-200' : 'bg-green-50 border border-green-200'}`}>
+                <p className="font-medium">{supplierImportResults.ok} proveedores importados</p>
+                {supplierImportResults.errors.slice(0, 3).map((e, i) => <p key={i} className="text-red-600 text-xs mt-1">{e}</p>)}
+              </div>
+            )}
             <div className="border rounded-lg p-4 space-y-3 bg-gray-50">
               <h3 className="text-sm font-semibold">{editingSupplier ? 'Editar proveedor' : 'Nuevo proveedor'}</h3>
               <div className="grid grid-cols-2 gap-3">
