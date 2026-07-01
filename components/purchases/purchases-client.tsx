@@ -69,16 +69,12 @@ export function PurchasesClient({ initialOrders, products, suppliers }: Props) {
 
     // Actualizar con número de orden
     if (order) {
-      await supabase.rpc('exec_sql', { sql: `UPDATE purchase_orders SET order_number = next_po_number() WHERE id = '${order.id}' AND order_number = ''` })
-        .catch(() => null) // fallback si no existe rpc
-
-      // Insertar número manualmente si es necesario
-      const { data: seqData } = await supabase
+      // Asignar número de orden único
+      await supabase
         .from('purchase_orders')
         .update({ order_number: `OC-${Date.now()}` })
         .eq('id', order.id)
         .eq('order_number', '')
-        .select()
 
       const itemsPayload = items.map(i => ({
         purchase_order_id: order.id,
