@@ -284,9 +284,9 @@ export function PurchasesClient({ initialOrders, products, suppliers: initialSup
 
       if (orderErr || !order) { errors.push(`OC "${proveedor}": ${orderErr?.message}`); continue }
 
-      // Insertar ítems
+      // Insertar ítems (total_cost_pen es columna generada, no se envía)
       const { error: itemsErr } = await supabase.from('purchase_order_items').insert(
-        itemsPayload.map(i => ({ ...i, purchase_order_id: order.id, total_cost_pen: i.quantity * i.unit_cost_pen }))
+        itemsPayload.map(i => ({ product_id: i.product_id, quantity: i.quantity, unit_cost_original: i.unit_cost_original, unit_cost_pen: i.unit_cost_pen, purchase_order_id: order.id }))
       )
       if (itemsErr) { errors.push(`Ítems OC "${proveedor}": ${itemsErr.message}`); continue }
 
