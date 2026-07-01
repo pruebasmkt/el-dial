@@ -33,6 +33,7 @@ export interface Product {
 export interface Supplier {
   id: string
   name: string
+  ruc?: string
   contact_name?: string
   phone?: string
   email?: string

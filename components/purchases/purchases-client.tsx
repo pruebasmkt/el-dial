@@ -7,11 +7,12 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
+import { Combobox } from '@/components/ui/combobox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Card, CardContent } from '@/components/ui/card'
-import { Plus, Trash2, ShoppingCart, CheckCircle, Package } from 'lucide-react'
+import { Plus, Trash2, ShoppingCart, Package, Building2, X } from 'lucide-react'
 import { formatCurrency, formatDate, PO_STATUS_LABELS, PO_STATUS_COLORS, convertToSoles } from '@/lib/utils'
 import type { PurchaseOrder, Product, Supplier, Currency } from '@/types'
 
@@ -23,19 +24,32 @@ interface Props {
   suppliers: Supplier[]
 }
 
-export function PurchasesClient({ initialOrders, products, suppliers }: Props) {
+const TODAY = new Date().toISOString().split('T')[0]
+
+export function PurchasesClient({ initialOrders, products, suppliers: initialSuppliers }: Props) {
   const [open, setOpen] = useState(false)
+  const [supplierOpen, setSupplierOpen] = useState(false)
   const [detailOrder, setDetailOrder] = useState<PurchaseOrder | null>(null)
+  const [suppliers, setSuppliers] = useState(initialSuppliers)
   const [currency, setCurrency] = useState<Currency>('PEN')
   const [exchangeRate, setExchangeRate] = useState(3.75)
-  const [supplierName, setSupplierName] = useState('')
-  const [orderDate, setOrderDate] = useState(new Date().toISOString().split('T')[0])
+  const [supplierId, setSupplierId] = useState('')
+  const [orderDate, setOrderDate] = useState(TODAY)
   const [notes, setNotes] = useState('')
   const [items, setItems] = useState<OrderItem[]>([{ product_id: '', quantity: 1, unit_cost_original: 0 }])
   const [loading, setLoading] = useState(false)
+
+  // Supplier form
+  const [supplierForm, setSupplierForm] = useState({ name: '', ruc: '', contact: '', phone: '', email: '' })
+  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null)
+  const [supplierLoading, setSupplierLoading] = useState(false)
+
   const router = useRouter()
   const supabase = createClient()
   const { toast } = useToast()
+
+  const productOptions = products.map(p => ({ value: p.id, label: p.name, sublabel: p.sku }))
+  const supplierOptions = suppliers.map(s => ({ value: s.id, label: s.name, sublabel: s.ruc ?? undefined }))
 
   function addItem() { setItems(i => [...i, { product_id: '', quantity: 1, unit_cost_original: 0 }]) }
   function removeItem(idx: number) { setItems(i => i.filter((_, j) => j !== idx)) }
@@ -47,16 +61,17 @@ export function PurchasesClient({ initialOrders, products, suppliers }: Props) {
   const subtotalPen = convertToSoles(subtotalOriginal, currency, exchangeRate)
 
   async function handleCreate() {
-    if (!supplierName || items.some(i => !i.product_id || i.quantity <= 0 || i.unit_cost_original <= 0)) {
-      toast({ title: 'Datos incompletos', description: 'Completa todos los campos', variant: 'destructive' })
+    if (!supplierId || items.some(i => !i.product_id || i.quantity <= 0 || i.unit_cost_original <= 0)) {
+      toast({ title: 'Datos incompletos', description: 'Selecciona proveedor y completa todos los ítems', variant: 'destructive' })
       return
     }
     setLoading(true)
+    const selectedSupplier = suppliers.find(s => s.id === supplierId)
     const { data: order, error: orderErr } = await supabase
       .from('purchase_orders')
       .insert({
-        order_number: '', // será reemplazado por trigger o función
-        supplier_name: supplierName,
+        order_number: `OC-${Date.now()}`,
+        supplier_name: selectedSupplier?.name ?? '',
         order_date: orderDate,
         currency,
         exchange_rate: exchangeRate,
@@ -67,15 +82,7 @@ export function PurchasesClient({ initialOrders, products, suppliers }: Props) {
       .select()
       .single()
 
-    // Actualizar con número de orden
     if (order) {
-      // Asignar número de orden único
-      await supabase
-        .from('purchase_orders')
-        .update({ order_number: `OC-${Date.now()}` })
-        .eq('id', order.id)
-        .eq('order_number', '')
-
       const itemsPayload = items.map(i => ({
         purchase_order_id: order.id,
         product_id: i.product_id,
@@ -93,6 +100,8 @@ export function PurchasesClient({ initialOrders, products, suppliers }: Props) {
         resetForm()
         router.refresh()
       }
+    } else {
+      toast({ title: 'Error', description: orderErr?.message, variant: 'destructive' })
     }
     setLoading(false)
   }
@@ -113,14 +122,61 @@ export function PurchasesClient({ initialOrders, products, suppliers }: Props) {
   }
 
   function resetForm() {
-    setSupplierName(''); setNotes(''); setCurrency('PEN'); setExchangeRate(3.75)
-    setOrderDate(new Date().toISOString().split('T')[0])
+    setSupplierId(''); setNotes(''); setCurrency('PEN'); setExchangeRate(3.75)
+    setOrderDate(TODAY)
     setItems([{ product_id: '', quantity: 1, unit_cost_original: 0 }])
+  }
+
+  // Supplier CRUD
+  async function handleSaveSupplier() {
+    if (!supplierForm.name.trim()) return
+    setSupplierLoading(true)
+    const payload = {
+      name: supplierForm.name.trim(),
+      ruc: supplierForm.ruc.trim() || null,
+      contact_name: supplierForm.contact.trim() || null,
+      phone: supplierForm.phone.trim() || null,
+      email: supplierForm.email.trim() || null,
+    }
+    const { data, error } = editingSupplier
+      ? await supabase.from('suppliers').update(payload).eq('id', editingSupplier.id).select().single()
+      : await supabase.from('suppliers').insert(payload).select().single()
+
+    if (error) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' })
+    } else {
+      toast({ title: editingSupplier ? 'Proveedor actualizado' : 'Proveedor creado', variant: 'success' })
+      if (data) {
+        setSuppliers(prev => editingSupplier
+          ? prev.map(s => s.id === data.id ? data : s)
+          : [...prev, data]
+        )
+      }
+      setEditingSupplier(null)
+      setSupplierForm({ name: '', ruc: '', contact: '', phone: '', email: '' })
+    }
+    setSupplierLoading(false)
+  }
+
+  async function toggleSupplierActive(s: Supplier) {
+    await supabase.from('suppliers').update({ is_active: !s.is_active }).eq('id', s.id)
+    setSuppliers(prev => prev.map(x => x.id === s.id ? { ...x, is_active: !x.is_active } : x))
+  }
+
+  function openEditSupplier(s: Supplier) {
+    setEditingSupplier(s)
+    setSupplierForm({
+      name: s.name, ruc: s.ruc ?? '', contact: s.contact_name ?? '',
+      phone: s.phone ?? '', email: s.email ?? '',
+    })
   }
 
   return (
     <>
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        <Button variant="outline" onClick={() => setSupplierOpen(true)}>
+          <Building2 className="h-4 w-4 mr-2" /> Gestionar Proveedores
+        </Button>
         <Button onClick={() => { resetForm(); setOpen(true) }}>
           <Plus className="h-4 w-4 mr-2" /> Nueva Orden de Compra
         </Button>
@@ -152,9 +208,7 @@ export function PurchasesClient({ initialOrders, products, suppliers }: Props) {
                 <TableCell className="font-mono text-sm font-semibold">{o.order_number}</TableCell>
                 <TableCell>{o.supplier_name}</TableCell>
                 <TableCell className="text-sm text-gray-500">{formatDate(o.order_date)}</TableCell>
-                <TableCell>
-                  <Badge variant="outline">{o.currency}</Badge>
-                </TableCell>
+                <TableCell><Badge variant="outline">{o.currency}</Badge></TableCell>
                 <TableCell className="text-right font-semibold">{formatCurrency(Number(o.subtotal_pen))}</TableCell>
                 <TableCell className="text-center">
                   <Badge className={PO_STATUS_COLORS[o.status]}>{PO_STATUS_LABELS[o.status]}</Badge>
@@ -188,7 +242,12 @@ export function PurchasesClient({ initialOrders, products, suppliers }: Props) {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <Label>Proveedor *</Label>
-                <Input placeholder="Nombre del proveedor" value={supplierName} onChange={e => setSupplierName(e.target.value)} />
+                <Combobox
+                  options={supplierOptions}
+                  value={supplierId}
+                  onSelect={setSupplierId}
+                  placeholder="Buscar proveedor..."
+                />
               </div>
               <div className="space-y-1.5">
                 <Label>Fecha</Label>
@@ -224,14 +283,12 @@ export function PurchasesClient({ initialOrders, products, suppliers }: Props) {
                   <div key={idx} className="grid grid-cols-12 gap-2 items-end">
                     <div className="col-span-5 space-y-1">
                       {idx === 0 && <Label className="text-xs">Producto</Label>}
-                      <Select value={item.product_id} onValueChange={v => updateItem(idx, 'product_id', v)}>
-                        <SelectTrigger><SelectValue placeholder="Seleccionar producto..." /></SelectTrigger>
-                        <SelectContent>
-                          {products.map(p => (
-                            <SelectItem key={p.id} value={p.id}>{p.name} — {p.sku}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <Combobox
+                        options={productOptions}
+                        value={item.product_id}
+                        onSelect={v => updateItem(idx, 'product_id', v)}
+                        placeholder="Buscar producto..."
+                      />
                     </div>
                     <div className="col-span-2 space-y-1">
                       {idx === 0 && <Label className="text-xs">Cantidad</Label>}
@@ -278,6 +335,91 @@ export function PurchasesClient({ initialOrders, products, suppliers }: Props) {
               {loading ? 'Creando...' : 'Crear Orden'}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog gestionar proveedores */}
+      <Dialog open={supplierOpen} onOpenChange={v => { setSupplierOpen(v); if (!v) { setEditingSupplier(null); setSupplierForm({ name: '', ruc: '', contact: '', phone: '', email: '' }) } }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Gestionar Proveedores</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="border rounded-lg p-4 space-y-3 bg-gray-50">
+              <h3 className="text-sm font-semibold">{editingSupplier ? 'Editar proveedor' : 'Nuevo proveedor'}</h3>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">Nombre *</Label>
+                  <Input placeholder="Empresa SAC" value={supplierForm.name} onChange={e => setSupplierForm(f => ({ ...f, name: e.target.value }))} />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">RUC</Label>
+                  <Input placeholder="20123456789" value={supplierForm.ruc} onChange={e => setSupplierForm(f => ({ ...f, ruc: e.target.value }))} />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Contacto</Label>
+                  <Input placeholder="Juan Pérez" value={supplierForm.contact} onChange={e => setSupplierForm(f => ({ ...f, contact: e.target.value }))} />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Teléfono</Label>
+                  <Input placeholder="999 999 999" value={supplierForm.phone} onChange={e => setSupplierForm(f => ({ ...f, phone: e.target.value }))} />
+                </div>
+                <div className="col-span-2 space-y-1">
+                  <Label className="text-xs">Email</Label>
+                  <Input placeholder="ventas@empresa.com" value={supplierForm.email} onChange={e => setSupplierForm(f => ({ ...f, email: e.target.value }))} />
+                </div>
+              </div>
+              <div className="flex gap-2 justify-end">
+                {editingSupplier && (
+                  <Button variant="outline" size="sm" onClick={() => { setEditingSupplier(null); setSupplierForm({ name: '', ruc: '', contact: '', phone: '', email: '' }) }}>
+                    <X className="h-3 w-3 mr-1" /> Cancelar
+                  </Button>
+                )}
+                <Button size="sm" onClick={handleSaveSupplier} disabled={supplierLoading || !supplierForm.name.trim()}>
+                  {supplierLoading ? 'Guardando...' : editingSupplier ? 'Actualizar' : 'Agregar'}
+                </Button>
+              </div>
+            </div>
+
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Nombre</TableHead>
+                  <TableHead>RUC</TableHead>
+                  <TableHead>Contacto</TableHead>
+                  <TableHead>Teléfono</TableHead>
+                  <TableHead className="text-center">Estado</TableHead>
+                  <TableHead></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {suppliers.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center py-6 text-gray-400">No hay proveedores</TableCell>
+                  </TableRow>
+                ) : suppliers.map(s => (
+                  <TableRow key={s.id}>
+                    <TableCell className="font-medium">{s.name}</TableCell>
+                    <TableCell className="text-sm text-gray-500">{s.ruc ?? '—'}</TableCell>
+                    <TableCell className="text-sm">{s.contact_name ?? '—'}</TableCell>
+                    <TableCell className="text-sm">{s.phone ?? '—'}</TableCell>
+                    <TableCell className="text-center">
+                      <Badge
+                        variant={s.is_active ? 'success' : 'secondary'}
+                        className="cursor-pointer"
+                        onClick={() => toggleSupplierActive(s)}
+                      >
+                        {s.is_active ? 'Activo' : 'Inactivo'}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Button variant="ghost" size="sm" onClick={() => openEditSupplier(s)}>Editar</Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         </DialogContent>
       </Dialog>
 
