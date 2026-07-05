@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { Sidebar } from '@/components/layout/sidebar'
+import { NavigationProgress } from '@/components/layout/navigation-progress'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
@@ -15,6 +16,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <div className="flex min-h-screen bg-gray-50">
+      <NavigationProgress />
       <Sidebar lowStockCount={count ?? 0} />
       <main className="flex-1 overflow-auto pt-14 md:pt-0">
         {children}
