@@ -31,7 +31,7 @@ export function Sidebar({ lowStockCount = 0 }: SidebarProps) {
   const supabase = createClient()
   const [open, setOpen] = useState(false)
 
-  // Cierra el menú al cambiar de ruta
+  // Cierra el menú cuando termina la navegación (fallback)
   useEffect(() => { setOpen(false) }, [pathname])
 
   // Bloquea scroll del body cuando el menú está abierto en mobile
@@ -75,6 +75,7 @@ export function Sidebar({ lowStockCount = 0 }: SidebarProps) {
             <Link
               key={href}
               href={href}
+              onClick={() => setOpen(false)}
               className={cn(
                 'flex items-center gap-3 px-3 py-3 rounded-lg text-sm font-medium transition-colors',
                 active
