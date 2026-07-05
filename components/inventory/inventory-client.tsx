@@ -91,7 +91,7 @@ export function InventoryClient({ inventory, lots }: Props) {
       </div>
 
       {/* Tabla */}
-      <div className="bg-white rounded-lg border">
+      <div className="bg-white rounded-lg border overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>

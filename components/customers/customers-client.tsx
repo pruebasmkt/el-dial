@@ -179,7 +179,7 @@ export function CustomersClient({ initialCustomers }: { initialCustomers: Custom
         </div>
       )}
 
-      <div className="bg-white rounded-lg border">
+      <div className="bg-white rounded-lg border overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>
